@@ -1,0 +1,21 @@
+# LDpred #
+
+# echo coord
+
+for i in {27800,27801,27822,27823,28500,28501,28502,28503,28504,28505,28506,28507,28508,28509,28510,28511,28512,28513,28514,28515,28516,28517,28518,28519,28520,28521,28522,28523,28524,28525,28526,28527,28528,28529,28530,28531,28532,28533,28534,28535,28536,28537}; do
+sbatch --nodelist compute-0-0 --mem=40G -o /storage0/lab/khm1576/fastGWA_ex/LDpred/${i}/2.coord.log -J ${i} \
+--wrap="ldpred coord --gf=/storage0/lab/khm1576/fastGWA_ex/OCT \
+--ssf=/storage0/lab/khm1576/fastGWA_ex/LDpred/${i}/1.sumstat.txt --ssf-format=BASIC \
+--N=55469 --maf=0.01 --out=/storage0/lab/khm1576/fastGWA_ex/LDpred/${i}/2.coord.txt"
+done
+
+
+
+# echo gibbs
+
+for i in {27800,27801,27822,27823,28500,28501,28502,28503,28504,28505,28506,28507,28508,28509,28510,28511,28512,28513,28514,28515,28516,28517,28518,28519,28520,28521,28522,28523,28524,28525,28526,28527,28528,28529,28530,28531,28532,28533,28534,28535,28536,28537}; do
+sbatch --nodelist compute-1-1 --mem=40G -o /storage0/lab/khm1576/fastGWA_ex/LDpred/${i}/2.gibbs.log -J ${i} \
+--wrap="ldpred gibbs --cf=/storage0/lab/khm1576/fastGWA_ex/LDpred/${i}/2.coord.txt --ldr=358 \
+--ldf=/storage0/lab/khm1576/fastGWA_ex/LDpred/${i}/2.LD_gibbs.tar.gz \
+--N=55469 --out=/storage0/lab/khm1576/fastGWA_ex/LDpred/${i}/2.gibbs"
+done
