@@ -1,0 +1,12 @@
+### LDpred ###
+
+# step 4 #
+
+for fold in {1..10};do
+sbatch --mem=30G -o /storage0/lab/khm1576/ukb/pheno/Glaucoma/4.LDpred_score/4.Glaucoma_fold"$fold"_score.log -J gl_"$fold" --wrap="ldpred score \
+--gf=/storage0/dataUKB/UKB10fold/459188/Fold"$fold"_1.2M \
+--pf=/storage0/lab/khm1576/ukb/pheno/Glaucoma/phe_Glaucoma_fold"$fold".txt \
+--pf-format=STANDARD \
+--rf=/storage0/lab/khm1576/ukb/pheno/Glaucoma/3.LDpred_gibbs/3.Glaucoma_fold"$fold"_gibbs \
+--out=/storage0/lab/khm1576/ukb/pheno/Glaucoma/4.LDpred_score/4.Glaucoma_fold"$fold"_score"
+done
