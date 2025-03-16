@@ -1,0 +1,13 @@
+### LDpred ###
+
+# step 3 #
+
+for fold in {1..10}; do
+sbatch --mem=50G  -o /storage0/lab/khm1576/ukb/pheno/Glaucoma/3.LDpred_gibbs/3.Glaucoma_fold"$fold"_gibbs.log -J GlaG"$fold" \
+--wrap="ldpred gibbs \
+--cf=/storage0/lab/khm1576/ukb/pheno/Glaucoma/2.LDpred_coord/2.coord_fold"$fold".txt \
+--ldr=356 \
+--ldf=/storage0/lab/khm1576/ukb/pheno/Glaucoma/3.LDpred_gibbs/ld/2.Glaucoma_fold"$fold"_ld.tar.gz \
+--N=441482 \
+--out=/storage0/lab/khm1576/ukb/pheno/Glaucoma/3.LDpred_gibbs/3.Glaucoma_fold"$fold"_gibbs"
+done
