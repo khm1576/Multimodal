@@ -1,0 +1,16 @@
+### LDpred ###
+
+# step 2 #
+
+for fold in {1..10}; do
+sbatch --mem=50G -w compute-1-0 -o /storage0/lab/khm1576/ukb/pheno/Glaucoma/2.LDpred_coord/2.Glaucoma_fold"$fold"_coord.log -J Gla"$fold" \
+--wrap="ldpred coord \
+--gf /storage0/dataUKB/UKB10fold/459188/Fold"$fold"_1.2M \
+--ssf /storage0/lab/khm1576/ukb/pheno/Glaucoma/1.bolt_summary/1.Glaucoma_sumstat_fold"$fold".txt \
+--ssf-format=BASIC \
+--N=441482 \
+--A1="a1" \
+--A2="a2" \
+--maf=0.01 \
+--out /storage0/lab/khm1576/ukb/pheno/Glaucoma/2.LDpred_coord/2.coord_fold"$fold".txt"
+done
