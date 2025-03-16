@@ -1,0 +1,25 @@
+# fastGWA
+
+sbatch --mem=50G -o /storage0/lab/khm1576/fastGWA_ex/make_bed.log -J bed --wrap="plink1.9 \
+--bfile /storage0/dataUKB/UKB10fold_9M/merged/Whole_chr_459188 \
+--keep /storage0/lab/khm1576/IDPs/OCT/OCT_id.txt \
+--make-bed \
+--out /storage0/lab/khm1576/fastGWA_ex/OCT"
+
+
+for i in {1..100}; do
+    sbatch --nodelist=compute-1-1 --mem=10G -o /storage0/lab/khm1576/fastGWA_ex/GRM/OG_${i}.log -J OG_${i} --wrap="gcta64 --bfile /storage0/lab/khm1576/fastGWA_ex/OCT --make-grm-part 100 $i --out /storage0/lab/khm1576/fastGWA_ex/GRM/GRM_part${i}"
+done
+
+
+cat /storage0/lab/khm1576/fastGWA_ex/GRM/GRM_part*.part_100_*.grm.id > /storage0/lab/khm1576/fastGWA_ex/GRM/OCT.grm.id
+cat /storage0/lab/khm1576/fastGWA_ex/GRM/GRM_part*.part_100_*.grm.bin > /storage0/lab/khm1576/fastGWA_ex/GRM/OCT.grm.bin
+cat /storage0/lab/khm1576/fastGWA_ex/GRM/GRM_part*.part_100_*.grm.N.bin > /storage0/lab/khm1576/fastGWA_ex/GRM/OCT.grm.N.bin
+
+gcta64 --grm /storage0/lab/khm1576/fastGWA_ex/GRM/OCT --make-bK-sparse 0.05 --out /storage0/lab/khm1576/fastGWA_ex/GRM/OCT_sp_grm
+
+
+for i in {27801,27822,27823,28500,28501,28502,28503,28504,28505,28506,28507,28508,28509,28510,28511,28512,28513,28514,28515,28516,28517,28518,28519,28520,28521,28522,28523,28524,28525,28526,28527,28528,28529,28530,28531,28532,28533,28534,28535,28536,28537}; do
+sbatch --mem=50G -J ${i} --wrap="/storage0/lab/khm1576/gcta-1.94.1-linux-kernel-3-x86_64/gcta64 --bfile /storage0/lab/khm1576/fastGWA_ex/OCT --grm-sparse /storage0/lab/khm1576/fastGWA_ex/GRM/OCT_sp_grm --fastGWA-mlm --pheno /storage0/lab/khm1576/IDPs/OCT/${i}_app14048.txt --qcovar /storage0/lab/khm1576/fastGWA_ex/qcovar.txt --covar /storage0/lab/khm1576/fastGWA_ex/covar.txt --out /storage0/lab/khm1576/fastGWA_ex/OCT/${i}_assoc
+"
+done
