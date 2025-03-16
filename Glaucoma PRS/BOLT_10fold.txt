@@ -1,5 +1,5 @@
 for fold in {1..10};do
-sbatch --mem=100G -o /storage0/lab/khm1576/ukb/pheno/Glaucoma/10fold/vitD_fold"$fold"_BOLT.log -J vit_"$fold" --wrap="bolt \
+sbatch --mem=100G -o /storage0/lab/khm1576/ukb/pheno/Glaucoma/10Fold/Gla_fold"$fold"_BOLT.log -J Gla_"$fold" --wrap="bolt \
  --bed=/storage0/dataUKB/genotype/ukb_cal_chr{1:22}_v2.bed \
  --bim=/storage0/dataUKB/genotype/ukb_snp_chr{1:22}_v2.bim \
  --fam=/storage0/dataUKB/phenotype/ukb_cal_chr1_v2_CURRENT.fixCol6.fam \
@@ -7,8 +7,8 @@ sbatch --mem=100G -o /storage0/lab/khm1576/ukb/pheno/Glaucoma/10fold/vitD_fold"$
  --remove=/storage0/dataUKB/UKB10fold_459K/Fold"$fold"_samp_FID_IID.txt \
  --exclude=/storage0/dataUKB/phenotype/autosome_missing_gt_0.1.txt \
  --exclude=/storage0/dataUKB/phenotype/autosome_maf_lt_0.001.txt \
- --phenoFile=/storage0/lab/khm1576/ukb/pheno/Glaucoma/covariate/not_NA_VitD_cutoff.txt \
- --phenoCol=vitaminD \
+ --phenoFile=/storage0/lab/khm1576/ukb/pheno/Glaucoma/not_NA_final_glaucoma_phenotype_459K.txt \
+ --phenoCol=open_glaucoma \
  --covarFile=/storage0/dataUKB/covariate/ukb.processed_and_post2.plinkPCs.tab \
  --covarCol=cov_ASSESS_CENTER \
  --covarCol=cov_GENO_ARRAY \
@@ -21,11 +21,12 @@ sbatch --mem=100G -o /storage0/lab/khm1576/ukb/pheno/Glaucoma/10fold/vitD_fold"$
  --geneticMapFile=/storage0/dataUKB/phenotype/genetic_map_hg19.txt.gz \
  --lmmForceNonInf \
  --numThreads=10 \
- --statsFile=/storage0/lab/khm1576/ukb/pheno/Glaucoma/10fold/BOLT_UKB_VitD_fold"$fold".stats.gz \
+ --statsFile=/storage0/lab/khm1576/ukb/pheno/Glaucoma/10Fold/BOLT_UKB_Gla_fold"$fold".stats.gz \
  --bgenFile=/storage0/dataUKB/imputation/ukb_imp_chr{1:22}_v3.bgen \
  --bgenMinMAF=0.01 \
  --bgenMinINFO=0.8 \
- --sampleFile=/storage0/dataUKB/phenotype/ukb14048_imp_chr1_v2_s487406.sample \
- --statsFileBgenSnps=/storage0/lab/khm1576/ukb/pheno/Glaucoma/10fold/BOLT_UKB_VitD_fold"$fold".bgen.stats.gz \
+ --sampleFile=/storage0/dataUKB/phenotype/ukb_imp_chr1_v2_s487406.sample \
+ --statsFileBgenSnps=/storage0/lab/khm1576/ukb/pheno/Glaucoma/10Fold/BOLT_UKB_Gla_fold"$fold".bgen.stats.gz \
  --verboseStats"
 done
+
