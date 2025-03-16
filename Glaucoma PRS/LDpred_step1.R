@@ -12,7 +12,7 @@ library(glue)
 for(fold in 1:10){
   print(glue(" #################### FOLD{fold} #################### "))
   print(glue('{Sys.time()}:: Start Load BOLT file:: fold{fold}'))
-  Gla <- fread(glue("/storage0/lab/khm1576/ukb/pheno/Glaucoma/10fold/BOLT_UKB_Gla_fold{fold}.bgen.stats.gz"))
+  Gla <- fread(glue("/storage0/lab/khm1576/ukb/pheno/Glaucoma/BOLT_UKB_Gla_fold{fold}.bgen.stats.gz"))
   print(glue('QC:: fold{fold}'))
   Gla <- Gla[Gla$A1FREQ > 0.01 & Gla$A1FREQ < 0.99,]
   
