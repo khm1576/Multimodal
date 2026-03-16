@@ -1,364 +1,241 @@
 library(data.table)
 library(pROC)
 library(dplyr)
-library(xgboost)
-library(caret)
 library(glmnet)
 library(ModelMetrics)
 
+# =========================================================
+# 0. Common functions
+# =========================================================
 
-# Loading Data
-file_name ="ConvNext_femto" #file_name is one of "ConvNext_femto", "PIT", "deit", "xcit", "VIT"
+set.seed(123)
+
+evaluate_lasso_model <- function(data, outcome, features, model_name = "Model") {
+  # use complete cases only
+  model_data <- data[, c(outcome, features), with = FALSE]
+  model_data <- model_data[complete.cases(model_data)]
+
+  x <- as.matrix(model_data[, ..features])
+  y <- model_data[[outcome]]
+
+  fit <- cv.glmnet(
+    x = x,
+    y = y,
+    family = "binomial",
+    alpha = 1
+  )
+
+  pred <- as.numeric(
+    predict(fit, newx = x, type = "response", s = "lambda.min")
+  )
+
+  roc_obj <- pROC::roc(y, pred)
+  auc_ci <- pROC::ci.auc(roc_obj, conf.level = 0.95, method = "delong")
+  auc_val <- as.numeric(pROC::auc(roc_obj))
+
+  delong_se <- (auc_ci[3] - auc_ci[1]) / (2 * 1.96)
+
+  brier_score <- ModelMetrics::brier(actual = y, predicted = pred)
+  brier_individual <- (pred - y)^2
+  brier_se <- sd(brier_individual) / sqrt(length(brier_individual))
+  brier_ci_lower <- brier_score - 1.96 * brier_se
+  brier_ci_upper <- brier_score + 1.96 * brier_se
+
+  cat("\n=====================================================\n")
+  cat("Model:", model_name, "\n")
+  cat("Features:", paste(features, collapse = ", "), "\n")
+  cat("N =", nrow(model_data), "\n")
+  cat("AUC:", round(auc_val, 5), "\n")
+  cat("95% CI (DeLong): [", round(auc_ci[1], 5), ", ", round(auc_ci[3], 5), "]\n", sep = "")
+  cat("DeLong SE:", round(delong_se, 5), "\n")
+  cat("Brier Score:", round(brier_score, 5), "\n")
+  cat("Brier SE:", round(brier_se, 5), "\n")
+  cat("95% CI (Brier): [", round(brier_ci_lower, 5), ", ", round(brier_ci_upper, 5), "]\n", sep = "")
+
+  return(list(
+    model_name = model_name,
+    n = nrow(model_data),
+    features = features,
+    fit = fit,
+    pred = pred,
+    auc = auc_val,
+    auc_ci = auc_ci,
+    delong_se = delong_se,
+    brier = brier_score,
+    brier_se = brier_se,
+    brier_ci = c(brier_ci_lower, brier_ci_upper)
+  ))
+}
+
+# =========================================================
+# 1. File paths and loading
+# =========================================================
+
+file_name <- "ConvNext_femto"   # one of: "ConvNext_femto", "PIT", "deit", "xcit", "VIT"
 ids_path <- paste0("/home/guestuser1/", file_name, "/IDS/IDS(xgboost).txt")
-dat <- fread('/storage0/lab/khm1576/연구주제/disease/Glaucoma_All_Cov.txt')
-prs <- fread('/storage0/lab/khm1576/연구주제/PRS/Glaucoma_app14048.txt')
+
+cov_path  <- "/storage0/lab/khm1576/연구주제/disease/Glaucoma_All_Cov.txt"
+prs_path  <- "/storage0/lab/khm1576/연구주제/PRS/Glaucoma_app14048.txt"
+oct_path  <- "/storage0/lab/khm1576/IDPs/OCT/OCT_IDPs.txt"
+oct_id_path <- "/storage0/lab/khm1576/IDPs/OCT/OCT_id.txt"
+igs_path  <- "/storage0/lab/khm1576/fastGWA_ex/LDpred/IGS.txt"
+igs2_path <- "/storage0/lab/khm1576/fastGWA_ex/LDpred/IGS2.txt"
+
+dat <- fread(cov_path)
+prs <- fread(prs_path)
 ids <- fread(ids_path)
-oct <- fread('/storage0/lab/khm1576/IDPs/OCT/OCT_IDPs.txt')
-id <- fread('/storage0/lab/khm1576/IDPs/OCT/OCT_id.txt')
+oct <- fread(oct_path)
+oct_id <- fread(oct_id_path)
+
+# =========================================================
+# 2. Preprocessing for 55k dataset
+# =========================================================
+
+# remove unnecessary OCT columns
 oct <- oct[, !c("27851-0.0", "27853-0.0", "27855-0.0", "27857-0.0"), with = FALSE]
 setnames(oct, old = names(oct), new = gsub("-0\\.0$", "", names(oct)))
+
+# rename IDS ID column
 setnames(ids, old = "ID", new = "app77890")
+
+# app77890 -> app14048 mapping
 id_map <- unique(dat[, .(app77890, app14048)])
 ids <- merge(ids, id_map, by = "app77890", all.x = TRUE)
 
-dat1 <- dat[(app14048 %in% id$V1), -c('townsend'), with = FALSE]
-dat1
+# keep only participants with OCT data
+dat_55k <- dat[(app14048 %in% oct_id$V1), -c("townsend"), with = FALSE]
+
+# merge IDS
 ids_subset <- ids[, .(app14048, IDS)]
-dat1 <- merge(dat1, ids_subset, by = "app14048")
-oct_sub <- oct[(app14048 %in% id$V1)]
-dat1 <- cbind(dat1, oct_sub[, -1, with = FALSE]) 
-dat1 <- dat1[, -2]
-colnames(dat1)
+dat_55k <- merge(dat_55k, ids_subset, by = "app14048")
 
+# merge OCT IDPs
+oct_sub <- oct[(app14048 %in% oct_id$V1)]
+dat_55k <- cbind(dat_55k, oct_sub[, -1, with = FALSE])
 
-###55k
+# keep original logic: remove second column
+dat_55k <- dat_55k[, -2, with = FALSE]
 
-# Cov
-colnames(dat1)
-colnames(dat1[,c('age','sex','alcohol','smoke','illness','edu','ethnic','centre')])
-set.seed(123)
-lasso_model <- cv.glmnet(as.matrix(dat1[,c('age','sex','alcohol','smoke','illness','edu','ethnic','centre')]), dat1$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model, as.matrix(dat1[,c('age','sex','alcohol','smoke','illness','edu','ethnic','centre')]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat1$Gla, predicted_prob_lasso11)
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
+# =========================================================
+# 3. Feature sets for 55k
+# =========================================================
 
-y <- dat1$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
+cov_features <- c("age", "sex", "alcohol", "smoke", "illness", "edu", "ethnic", "centre")
+prs_feature  <- "PRS_scale"
+ids_feature  <- "IDS"
 
+# replace previous index-based IDP selection with name-based selection
+base_cols_55k <- c("app14048", "Gla", cov_features, prs_feature, ids_feature)
+idp_features_55k <- setdiff(names(dat_55k), base_cols_55k)
 
+# define models
+models_55k <- list(
+  "Cov" = cov_features,
+  "PRS + IDPs" = c(prs_feature, idp_features_55k),
+  "PRS + IDS" = c(prs_feature, ids_feature),
+  "IDPs" = idp_features_55k,
+  "PRS + IDS + Cov + IDPs" = c(cov_features, prs_feature, ids_feature, idp_features_55k)
+)
 
-#####################################################################################
+# =========================================================
+# 4. Run 55k models
+# =========================================================
 
-# PRS
-#set.seed(123)
-#lasso_model <- cv.glmnet(as.matrix(dat1[,c('PRS_scale')]), dat1$Gla, family = "binomial", alpha = 1)
-#predicted_prob_lasso11 <- predict(lasso_model, as.matrix(dat1[,c('PRS_scale','IDS')]), type = "response", s = "lambda.min")
-#roc_obj_lasso11 <- roc(dat1$Gla, predicted_prob_lasso11)
-#auc(roc_obj_lasso11) 
+results_55k <- lapply(names(models_55k), function(model_name) {
+  evaluate_lasso_model(
+    data = dat_55k,
+    outcome = "Gla",
+    features = models_55k[[model_name]],
+    model_name = paste0("[55k] ", model_name)
+  )
+})
 
+names(results_55k) <- names(models_55k)
 
+# =========================================================
+# 5. Preprocessing for 400k dataset
+# =========================================================
 
-
-#####################################################################################
-
-# IDS
-#lasso_model <- cv.glmnet(as.matrix(dat1[,c('IDS')]), dat1$Gla, family = "binomial", alpha = 1)
-#predicted_prob_lasso11 <- predict(lasso_model, as.matrix(dat1[,c('PRS_scale','IDS')]), type = "response", s = "lambda.min")
-#roc_obj_lasso11 <- roc(dat1$Gla, predicted_prob_lasso11)
-#auc(roc_obj_lasso11) 
-
-
-#####################################################################################
-# PRS + IDPs
-set.seed(123)
-colnames(dat1)
-lasso_model <- cv.glmnet(as.matrix(dat1[,c(3,13:54)]), dat1$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model, as.matrix(dat1[,c(3,13:54)]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat1$Gla, predicted_prob_lasso11)
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong  SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
-
-y <- dat1$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
-
-
-#####################################################################################
-
-# PRS + IDS
-set.seed(123)
-lasso_model <- cv.glmnet(as.matrix(dat1[,c('PRS_scale','IDS')]), dat1$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model, as.matrix(dat1[,c('PRS_scale','IDS')]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat1$Gla, predicted_prob_lasso11)
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
-
-y <- dat1$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
-
-#####################################################################################
-
-# IDPs
-#dat1
-colnames(dat1[,-c(1:12)])
-set.seed(123)
-lasso_model <- cv.glmnet(as.matrix(dat1[,-c(1:12)]), dat1$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model, as.matrix(dat1[,-c(1:12)]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat1$Gla, predicted_prob_lasso11)
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
-
-y <- dat1$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
-
-
-#####################################################################################
-
-# PRS + IDS + Cov + IDPs
-colnames(dat1)
-#colnames(dat1[,-1])
-colnames(dat1[,-c(1:2)])
-set.seed(123)
-lasso_model <- cv.glmnet(as.matrix(dat1[,-c(1:2)]), dat1$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model, as.matrix(dat1[,-c(1:2)]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat1$Gla, predicted_prob_lasso11)
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
-
-y <- dat1$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
-
-
-
-
-###############################400k###########################################
-
-dat <- fread('/storage0/lab/khm1576/연구주제/disease/Glaucoma_All_Cov.txt')
-igs <- fread('/storage0/lab/khm1576/fastGWA_ex/LDpred/IGS.txt')
-igs2 <- fread('/storage0/lab/khm1576/fastGWA_ex/LDpred/IGS2.txt')
-
-colnames(igs)
-nrow(igs)
-ncol(igs)
-igs
-colnames(igs2)
-
-
+igs <- fread(igs_path)
+igs2 <- fread(igs2_path)
 
 setkey(igs, app14048)
 setkey(igs2, app14048)
 igs_merged <- merge(igs, igs2, by = "app14048", all = TRUE)
-ncol(igs_merged)
-igs<-igs_merged
-ncol(igs)
-colnames(igs)
 
+# combine dat and igs
+dat_400k <- cbind(dat[, -c("app77890", "townsend"), with = FALSE], igs_merged[, -1, with = FALSE])
 
+# exclude OCT participants and remove missing outcomes
+dat_400k <- dat_400k[!(app14048 %in% oct_id$V1) & !is.na(Gla)]
 
+# complete cases for covariates
+dat_400k_cov_complete <- dat_400k[
+  complete.cases(dat_400k[, ..cov_features])
+]
 
+# =========================================================
+# 6. Feature sets for 400k
+# =========================================================
 
-dat1 <- cbind(dat[,-c('app77890','townsend')],igs[,-1])
-id <- fread('/storage0/lab/khm1576/IDPs/OCT/OCT_id.txt')
-dat1 <- dat1[!(app14048 %in% id$V1)&!is.na(dat1$Gla),]
-#dat1 <- dat1[(app14048 %in% id$V1)&!is.na(dat1$Gla),]
-nrow(dat1)
-ncol(dat1)
+base_cols_400k <- c("app14048", "Gla", cov_features, prs_feature)
+igs_features <- setdiff(names(dat_400k), base_cols_400k)
 
+models_400k <- list(
+  "Cov" = cov_features,
+  "IGSs" = igs_features,
+  "PRS + IGSs" = c(prs_feature, igs_features),
+  "PRS + IGSs + Cov" = c(cov_features, prs_feature, igs_features)
+)
 
-# Cov
-dat_cata <- dat1[complete.cases(dat1[, c("age", "sex", "alcohol", "smoke", "illness", "edu", "ethnic", "centre")])]
-dat_cata[,c('age','sex',"alcohol", "smoke", "illness", "edu", "ethnic", "centre")]
-lasso_model11 <- cv.glmnet(as.matrix(dat_cata[,c('age','sex',"alcohol", "smoke", "illness", "edu", "ethnic", "centre")]), dat_cata$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model11, as.matrix(dat_cata[,c('age','sex',"alcohol", "smoke", "illness", "edu", "ethnic", "centre")]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat_cata$Gla, predicted_prob_lasso11)
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
+# select dataset for each model
+data_for_400k_models <- list(
+  "Cov" = dat_400k_cov_complete,
+  "IGSs" = dat_400k,
+  "PRS + IGSs" = dat_400k,
+  "PRS + IGSs + Cov" = dat_400k_cov_complete
+)
 
-y <- dat_cata$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
+# =========================================================
+# 7. Run 400k models
+# =========================================================
 
+results_400k <- lapply(names(models_400k), function(model_name) {
+  evaluate_lasso_model(
+    data = data_for_400k_models[[model_name]],
+    outcome = "Gla",
+    features = models_400k[[model_name]],
+    model_name = paste0("[400k] ", model_name)
+  )
+})
 
+names(results_400k) <- names(models_400k)
 
+# =========================================================
+# 8. Optional summary table
+# =========================================================
 
+extract_summary <- function(res_list) {
+  rbindlist(lapply(res_list, function(x) {
+    data.table(
+      Model = x$model_name,
+      N = x$n,
+      AUC = round(x$auc, 5),
+      AUC_CI_Lower = round(x$auc_ci[1], 5),
+      AUC_CI_Upper = round(x$auc_ci[3], 5),
+      DeLong_SE = round(x$delong_se, 5),
+      Brier = round(x$brier, 5),
+      Brier_CI_Lower = round(x$brier_ci[1], 5),
+      Brier_CI_Upper = round(x$brier_ci[2], 5)
+    )
+  }))
+}
 
+summary_55k <- extract_summary(results_55k)
+summary_400k <- extract_summary(results_400k)
 
+cat("\n\n==================== 55k Summary ====================\n")
+print(summary_55k)
 
-
-
-# IGSs
-colnames(dat1[,-c(1:11)])
-dat1[,-c(1:11)]
-lasso_model11 <- cv.glmnet(as.matrix(dat1[,-c(1:11)]), dat1$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model11, as.matrix(dat1[,-c(1:11)]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat1$Gla, predicted_prob_lasso11)
-pROC::auc(roc_obj_lasso11) 
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
-
-y <- dat1$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
-
-
-
-
-# PRS + IGSs
-colnames(dat1[,-c(1,2,4:11)])
-lasso_model11 <- cv.glmnet(as.matrix(dat1[,-c(1,2,4:11)]), dat1$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model11, as.matrix(dat1[,-c(1,2,4:11)]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat1$Gla, predicted_prob_lasso11)
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
-
-y <- dat1$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
-
-
-# PRS + IGSs + Cov
-dat_cata[,-c(1,2)]
-lasso_model11 <- cv.glmnet(as.matrix(dat_cata[,-c(1,2)]), dat_cata$Gla, family = "binomial", alpha = 1)
-predicted_prob_lasso11 <- predict(lasso_model11, as.matrix(dat_cata[,-c(1,2)]), type = "response", s = "lambda.min")
-roc_obj_lasso11 <- pROC::roc(dat_cata$Gla, predicted_prob_lasso11)
-pROC::auc(roc_obj_lasso11) 
-ci <- pROC::ci.auc(roc_obj_lasso11,conf.level=0.95 ,method = "delong")
-print(ci)
-lower <- ci[1]
-upper <- ci[3]
-z <- 1.96
-se_est <- (upper - lower) / (2 * z)
-cat("DeLong SE:", round(se_est, 5), "\n")
-auc_value <- pROC::auc(roc_obj_lasso11)
-print(auc_value)
-
-y <- dat_cata$Gla
-p <- predicted_prob_lasso11
-brier_score <- ModelMetrics::brier(actual = y, predicted = p)
-brier_individual <- (p - y)^2
-se_brier <- sd(brier_individual) / sqrt(length(brier_individual))
-ci_lower <- brier_score - 1.96 * se_brier
-ci_upper <- brier_score + 1.96 * se_brier
-cat("Brier Score:", round(brier_score, 5), "\n")
-cat("Standard Error (SE):", round(se_brier, 5), "\n")
-cat("95% CI:", paste0("[", round(ci_lower, 5), ", ", round(ci_upper, 5), "]"), "\n")
-
-
-
+cat("\n\n==================== 400k Summary ====================\n")
+print(summary_400k)
