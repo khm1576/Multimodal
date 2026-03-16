@@ -7,226 +7,52 @@ library(pROC)
 library(dplyr)
 library(xgboost)
 
-file_name = "ConvNext_femto" #file_name is one of "ConvNext_femto", "PIT", "deit", "xcit", "VIT"
+file_name <- "ConvNext_femto"   # file_name is one of "ConvNext_femto", "PIT", "deit", "xcit", "VIT"
+base_path <- paste0("/home/guestuser1/", file_name)
 
-################### Making fold0.txt ##########################
-
-folder_path <- paste0("/home/guestuser1/", file_name, "/fold/fold0/fold0_pred")
-file_indices <- 0:127
-file_paths <- file.path(folder_path, paste0(file_indices, "_pred.csv"))
-
-
-df_list <- lapply(seq_along(file_paths), function(i) {
-  path <- file_paths[i]
-  df <- read.csv(path, stringsAsFactors = FALSE)
-  df_summarised <- df %>%
-    group_by(ID) %>%
-    summarise(
-      Actual = first(Actual),
-      !!paste0("b_scan", i - 1) := mean(Predicted_Prob),
-      .groups = "drop"
-    )
+################### make fold ##########################
+make_fold_file <- function(fold_num) {
+  folder_path <- file.path(base_path, "fold", paste0("fold", fold_num), paste0("fold", fold_num, "_pred"))
+  file_paths <- file.path(folder_path, paste0(0:127, "_pred.csv"))
   
-  return(df_summarised)
-})
-
-
-merged_df <- Reduce(function(x, y) full_join(x, y, by = c("ID", "Actual")), df_list)
-
-
-write.table(merged_df,
-            file = paste0("/home/guestuser1/", file_name, "/fold/fold0/fold0.txt"),
-            sep = "\t",
-            row.names = FALSE,
-            quote = FALSE)
-nrow(merged_df)
-##############################################################
-
-
-
-
-
-
-
-
-
-
-################### Making fold1.txt ##########################
-folder_path <- paste0("/home/guestuser1/", file_name, "/fold/fold1/fold1_pred")
-file_indices <- 0:127
-file_paths <- file.path(folder_path, paste0(file_indices, "_pred.csv"))
-
-# 파일 처리
-df_list <- lapply(seq_along(file_paths), function(i) {
-  path <- file_paths[i]
-  df <- read.csv(path, stringsAsFactors = FALSE)
+  df_list <- lapply(seq_along(file_paths), function(i) {
+    df <- read.csv(file_paths[i], stringsAsFactors = FALSE)
+    
+    df %>%
+      group_by(ID) %>%
+      summarise(
+        Actual = first(Actual),
+        !!paste0("b_scan", i - 1) := mean(Predicted_Prob),
+        .groups = "drop"
+      )
+  })
   
-
-  df_summarised <- df %>%
-    group_by(ID) %>%
-    summarise(
-      Actual = first(Actual),
-      !!paste0("b_scan", i - 1) := mean(Predicted_Prob),
-      .groups = "drop"
-    )
+  merged_df <- Reduce(function(x, y) full_join(x, y, by = c("ID", "Actual")), df_list)
   
-  return(df_summarised)
-})
-
-merged_df <- Reduce(function(x, y) full_join(x, y, by = c("ID", "Actual")), df_list)
-
-write.table(merged_df,
-            file = paste0("/home/guestuser1/", file_name, "/fold/fold1/fold1.txt"),
-            sep = "\t",
-            row.names = FALSE,
-            quote = FALSE)
-nrow(merged_df)
-###############################################################
-
-
-################### Making fold2.txt ##########################
-folder_path <- paste0("/home/guestuser1/", file_name, "/fold/fold2/fold2_pred")
-file_indices <- 0:127
-file_paths <- file.path(folder_path, paste0(file_indices, "_pred.csv"))
-
-
-df_list <- lapply(seq_along(file_paths), function(i) {
-  path <- file_paths[i]
-  df <- read.csv(path, stringsAsFactors = FALSE)
+  out_path <- file.path(base_path, "fold", paste0("fold", fold_num), paste0("fold", fold_num, ".txt"))
+  write.table(merged_df, file = out_path, sep = "\t", row.names = FALSE, quote = FALSE)
   
+  cat("fold", fold_num, "saved:", nrow(merged_df), "rows\n")
+  return(merged_df)
+}
 
-  df_summarised <- df %>%
-    group_by(ID) %>%
-    summarise(
-      Actual = first(Actual),
-      !!paste0("b_scan", i - 1) := mean(Predicted_Prob),
-      .groups = "drop"
-    )
-  
-  return(df_summarised)
-})
+################### Make fold0 ~ fold4 ##########################
+fold_list <- lapply(0:4, make_fold_file)
 
+#################### Merge all folds ########################
+merged_all <- bind_rows(fold_list)
 
-merged_df <- Reduce(function(x, y) full_join(x, y, by = c("ID", "Actual")), df_list)
+merged_path <- file.path(base_path, "fold", "fold_merged.txt")
+write.table(merged_all, file = merged_path, sep = "\t", row.names = FALSE, quote = FALSE)
 
-
-write.table(merged_df,
-            file = paste0("/home/guestuser1/", file_name, "/fold/fold2/fold2.txt"),
-            sep = "\t",
-            row.names = FALSE,
-            quote = FALSE)
-nrow(merged_df)
-
-
-
-
-################### Making fold3.txt ##########################
-folder_path <- paste0("/home/guestuser1/", file_name, "/fold/fold3/fold3_pred")
-file_indices <- 0:127
-file_paths <- file.path(folder_path, paste0(file_indices, "_pred.csv"))
-
-
-df_list <- lapply(seq_along(file_paths), function(i) {
-  path <- file_paths[i]
-  df <- read.csv(path, stringsAsFactors = FALSE)
-  
- 
-  df_summarised <- df %>%
-    group_by(ID) %>%
-    summarise(
-      Actual = first(Actual),
-      !!paste0("b_scan", i - 1) := mean(Predicted_Prob),
-      .groups = "drop"
-    )
-  
-  return(df_summarised)
-})
-
-
-merged_df <- Reduce(function(x, y) full_join(x, y, by = c("ID", "Actual")), df_list)
-
-
-write.table(merged_df,
-            file = paste0("/home/guestuser1/", file_name, "/fold/fold3/fold3.txt"),
-            sep = "\t",
-            row.names = FALSE,
-            quote = FALSE)
-nrow(merged_df)
-##############################################################
-
-
-
-################### Making fold4.txt ##########################
-folder_path <- paste0("/home/guestuser1/", file_name, "/fold/fold4/fold4_pred")
-file_indices <- 0:127
-file_paths <- file.path(folder_path, paste0(file_indices, "_pred.csv"))
-
-
-df_list <- lapply(seq_along(file_paths), function(i) {
-  path <- file_paths[i]
-  df <- read.csv(path, stringsAsFactors = FALSE)
-  
-
-  df_summarised <- df %>%
-    group_by(ID) %>%
-    summarise(
-      Actual = first(Actual),
-      !!paste0("b_scan", i - 1) := mean(Predicted_Prob),
-      .groups = "drop"
-    )
-  
-  return(df_summarised)
-})
-
-
-merged_df <- Reduce(function(x, y) full_join(x, y, by = c("ID", "Actual")), df_list)
-
-
-write.table(merged_df,
-            file = paste0("/home/guestuser1/", file_name, "/fold/fold3/fold3.txt"),
-            sep = "\t",
-            row.names = FALSE,
-            quote = FALSE)
-nrow(merged_df)
-##############################################################
-
-
-#################### Merging fold.txt ########################
-file_paths <- c(
-  paste0("/home/guestuser1/", file_name, "/fold/fold0/fold0.txt"),
-  paste0("/home/guestuser1/", file_name, "/fold/fold1/fold1.txt"),
-  paste0("/home/guestuser1/", file_name, "/fold/fold2/fold2.txt"),
-  paste0("/home/guestuser1/", file_name, "/fold/fold3/fold3.txt"),
-  paste0("/home/guestuser1/", file_name, "/fold/fold4/fold4.txt")
-)
-
-
-df_list <- lapply(file_paths, function(path) {
-  read.table(path, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-})
-
-
-merged_all <- bind_rows(df_list)
-
-write.table(merged_all,
-            file = paste0("/home/guestuser1/", file_name, "/fold/fold_merged.txt"),
-            sep = "\t",
-            row.names = FALSE,
-            quote = FALSE)
-
-
-
-################ Making IDS(xgboost) ##############################
+################ Making IDS (xgboost) ##############################
 set.seed(123)
 
-
-file_path <- paste0("/home/guestuser1/", file_name, "/fold/fold_merged.txt")
-df <- read.table(file_path, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+df <- read.table(merged_path, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
 
 X <- as.matrix(df %>% select(starts_with("b_scan")))
 y <- df$Actual
 dtrain <- xgb.DMatrix(data = X, label = y)
-set.seed(123)
 
 model <- xgb.cv(
   params = list(
@@ -246,7 +72,6 @@ model <- xgb.cv(
 
 predictions <- model$pred
 
-
 roc_obj <- roc(y, predictions)
 auc_value <- auc(roc_obj)
 print(paste("AUC:", auc_value))
@@ -254,16 +79,14 @@ print(paste("AUC:", auc_value))
 result_df <- df %>%
   select(ID, Actual) %>%
   mutate(IDS = predictions)
-result_df
 
-write.table(result_df,
-            file = paste0("/home/guestuser1/", file_name, "/IDS(xgboost).txt"),
-            sep = "\t",
-            row.names = FALSE,
-            quote = FALSE)
-
-
-#########################################################
+write.table(
+  result_df,
+  file = file.path(base_path, "IDS(xgboost).txt"),
+  sep = "\t",
+  row.names = FALSE,
+  quote = FALSE
+)
 
 
 
